@@ -37,19 +37,20 @@ st.write("🔄 *Attempting to download restricted land data from the State of Ma
 
 @st.cache_data(ttl=3600) 
 def get_malpf_data():
-    # Using the official MD iMAP endpoint
-    malpf_url = "https://geodata.md.gov/imap/rest/services/Environment/MD_ProtectedLands/FeatureServer/4/query"
+    # Using the official active MD iMAP endpoint (mdgeodata)
+    malpf_url = "https://mdgeodata.md.gov/imap/rest/services/Environment/MD_ProtectedLands/FeatureServer/4/query"
     
     # We use 'LIKE' to avoid apostrophe syntax errors with "Prince George's"
     params = {
-        "where": "COUNTY LIKE '%Prince George%'", 
+        "where": "County LIKE '%Prince George%'", 
         "outFields": "*", 
         "outSR": "4326", 
         "f": "geojson"
     }
     
     try:
-        response = requests.get(malpf_url, params=params, timeout=15)
+        # Increased timeout to 30 seconds for state servers
+        response = requests.get(malpf_url, params=params, timeout=30)
         return response.status_code, response.text
     except Exception as e:
         return 500, str(e)
@@ -77,7 +78,9 @@ if status_code == 200:
         else:
             st.warning("⚠️ Connected to Maryland servers, but found 0 restricted zones for this query.")
     except Exception as e:
-        st.error("❌ Downloaded the data, but it was corrupted.")
+        st.error(f"❌ Downloaded the data, but it was corrupted. Error: {e}")
+        with st.expander("See raw response from Maryland"):
+            st.write(response_text[:1000])
 else:
     st.error(f"❌ Failed to reach Maryland State Servers. Error Code: {status_code}")
     with st.expander("See technical error"):
