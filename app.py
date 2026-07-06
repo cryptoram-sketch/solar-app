@@ -3,6 +3,7 @@ import folium
 from streamlit_folium import st_folium
 import requests
 from supabase import create_client, Client
+import json
 
 # 1. Set up the page layout and title
 st.set_page_config(page_title="Solar Site Selector MVP", layout="wide")
@@ -32,37 +33,55 @@ else:
 m = folium.Map(location=[38.8298, -76.8483], zoom_start=10, tiles="CartoDB positron")
 
 # 5. FETCH LIVE DATA: Pull MALPF Easements directly from the State of Maryland
-@st.cache_data(ttl=3600) # Cache the data so it doesn't download on every single click
+st.write("🔄 *Attempting to download restricted land data from the State of Maryland...*")
+
+@st.cache_data(ttl=3600) 
 def get_malpf_data():
-    malpf_url = "https://mdgeodata.md.gov/imap/rest/services/Environment/MD_ProtectedLands/FeatureServer/4/query"
-    # Query specifically for Prince George's County
+    # Using the official MD iMAP endpoint
+    malpf_url = "https://geodata.md.gov/imap/rest/services/Environment/MD_ProtectedLands/FeatureServer/4/query"
+    
+    # We use 'LIKE' to avoid apostrophe syntax errors with "Prince George's"
     params = {
-        "where": "County='Prince George''s'", 
+        "where": "COUNTY LIKE '%Prince George%'", 
         "outFields": "*", 
         "outSR": "4326", 
         "f": "geojson"
     }
-    response = requests.get(malpf_url, params=params)
-    if response.status_code == 200:
-        return response.json()
-    return None
+    
+    try:
+        response = requests.get(malpf_url, params=params, timeout=15)
+        return response.status_code, response.text
+    except Exception as e:
+        return 500, str(e)
 
-malpf_geojson = get_malpf_data()
+status_code, response_text = get_malpf_data()
 
-# 6. Add the "No-Go" zones to the map
-if malpf_geojson and 'features' in malpf_geojson and len(malpf_geojson['features']) > 0:
-    st.write(f"🗺️ Loaded {len(malpf_geojson['features'])} restricted agricultural easements in PG County.")
-    folium.GeoJson(
-        malpf_geojson, 
-        name="MALPF Easements (No Solar)",
-        style_function=lambda x: {
-            'fillColor': '#ff0000', # Red for restricted
-            'color': '#ff0000',
-            'weight': 1,
-            'fillOpacity': 0.4
-        },
-        tooltip=folium.GeoJsonTooltip(fields=['Local_Name'], aliases=['Easement Name:'])
-    ).add_to(m)
+# 6. Diagnostics & Drawing the Red Zones
+if status_code == 200:
+    try:
+        malpf_geojson = json.loads(response_text)
+        features = malpf_geojson.get('features', [])
+        
+        if len(features) > 0:
+            st.success(f"✅ Success! Painted {len(features)} restricted agricultural zones (MALPF) on the map.")
+            folium.GeoJson(
+                malpf_geojson, 
+                name="MALPF Easements (No Solar)",
+                style_function=lambda x: {
+                    'fillColor': '#ff0000', # Red for restricted
+                    'color': '#ff0000',
+                    'weight': 1,
+                    'fillOpacity': 0.4
+                }
+            ).add_to(m)
+        else:
+            st.warning("⚠️ Connected to Maryland servers, but found 0 restricted zones for this query.")
+    except Exception as e:
+        st.error("❌ Downloaded the data, but it was corrupted.")
+else:
+    st.error(f"❌ Failed to reach Maryland State Servers. Error Code: {status_code}")
+    with st.expander("See technical error"):
+        st.write(response_text)
 
 # 7. Display the map
 st_folium(m, width=1200, height=600)
@@ -72,7 +91,7 @@ with st.sidebar:
     st.header("⚙️ Filtering Logic")
     
     st.checkbox("Show Parcels > 15 Acres", disabled=True, help="Will activate in Phase 3")
-    malpf_toggle = st.checkbox("Show MALPF Easements (Red)", value=True)
+    st.checkbox("Show MALPF Easements (Red)", value=True)
     st.checkbox("Hide Restricted BGE Circuits", disabled=True, help="Will activate in Phase 3")
     
     st.divider()
