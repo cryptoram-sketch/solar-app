@@ -29,8 +29,8 @@ if supabase:
 else:
     st.error("❌ Database not connected. Check Streamlit secrets.")
 
-# 4. Create a base map centered on Prince George's County
-m = folium.Map(location=[38.8298, -76.8483], zoom_start=10, tiles="CartoDB positron")
+# 4. Create a base map centered on the Central Maryland region
+m = folium.Map(location=[38.9, -76.7], zoom_start=9, tiles="CartoDB positron")
 
 # 5. FETCH LIVE DATA: Pull MALPF Easements directly from the State of Maryland
 st.write("🔄 *Attempting to download restricted land data from the State of Maryland...*")
@@ -40,12 +40,13 @@ def get_malpf_data():
     # Using the official active MD iMAP endpoint (mdgeodata)
     malpf_url = "https://mdgeodata.md.gov/imap/rest/services/Environment/MD_ProtectedLands/FeatureServer/4/query"
     
-    # We use 'LIKE' to avoid apostrophe syntax errors with "Prince George's"
+    # We use 1=1 to bypass Maryland's strict county spelling quirks and fetch the first 1000 records
     params = {
-        "where": "County LIKE '%Prince George%'", 
+        "where": "1=1", 
         "outFields": "*", 
         "outSR": "4326", 
-        "f": "geojson"
+        "f": "geojson",
+        "resultRecordCount": 1000
     }
     
     try:
