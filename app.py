@@ -4,7 +4,6 @@ from streamlit_folium import st_folium
 import requests
 from supabase import create_client, Client
 import json
-import time
 
 # 1. Set up the page layout and title
 st.set_page_config(page_title="Solar Site Selector MVP", layout="wide")
@@ -34,7 +33,6 @@ else:
 m = folium.Map(location=[38.8298, -76.8483], zoom_start=10, tiles="CartoDB positron")
 
 # 5. FETCH LIVE DATA: Pull MALPF Easements
-# We create a placeholder that disappears when it finishes loading
 status_placeholder = st.empty()
 status_placeholder.write("🔄 *Attempting to download restricted land data from the State of Maryland...*")
 
@@ -42,11 +40,11 @@ status_placeholder.write("🔄 *Attempting to download restricted land data from
 def get_malpf_data():
     malpf_url = "https://mdgeodata.md.gov/imap/rest/services/Environment/MD_ProtectedLands/FeatureServer/4/query"
     params = {
-        "where": "County LIKE '%Prince George%'", 
+        "where": "1=1", # Bypasses state spelling errors
         "outFields": "*", 
         "outSR": "4326", 
         "f": "geojson",
-        "resultRecordCount": 25 # Reduced from 1000 to 25 to prevent browser freezing!
+        "resultRecordCount": 25 # Prevents browser from freezing
     }
     try:
         response = requests.get(malpf_url, params=params, timeout=15)
@@ -81,7 +79,7 @@ if status_code == 200:
 else:
     status_placeholder.error(f"❌ Failed to reach Maryland State Servers. Error Code: {status_code}")
 
-# 7. PHASE 3: The Real Solar Logic Engine
+# 7. PHASE 3: The Real Solar Logic Engine (Connecting to Supabase)
 if "search_run" not in st.session_state:
         st.session_state.search_run = False
 
@@ -92,21 +90,25 @@ with st.sidebar:
     st.checkbox("Show MALPF Easements (Red)", value=True)
     st.checkbox("Hide Restricted BGE Circuits", value=True)
     st.divider()
+    
+    # This button now queries the REAL database
     if st.button("Find Viable Land", type="primary", use_container_width=True):
         st.session_state.search_run = True
 
 # 9. Process the real search and draw the results from Supabase
 if st.session_state.search_run:
-    with st.spinner("Querying Spatial Database..."):
+    with st.spinner("Querying Spatial Database for real parcels..."):
         try:
             # Execute the real PostGIS RPC function we built in Supabase
             response = supabase.rpc("get_viable_parcels", {"min_acres": min_acreage}).execute()
             parcel_geojson = response.data
             
-            if parcel_geojson and len(parcel_geojson.get("features", [])) > 0:
+            # Check if we got real data back from Supabase
+            if parcel_geojson and isinstance(parcel_geojson, dict) and len(parcel_geojson.get("features", [])) > 0:
                 count = len(parcel_geojson["features"])
-                st.sidebar.success(f"✅ Found {count} High-Confidence Sites in Database!")
+                st.sidebar.success(f"✅ Found {count} Real Parcels in Database!")
                 
+                # Draw the REAL green property boundaries on the map
                 folium.GeoJson(
                     parcel_geojson,
                     name="Viable Parcels",
@@ -122,9 +124,9 @@ if st.session_state.search_run:
                     )
                 ).add_to(m)
             else:
-                st.sidebar.warning("No parcels found in database matching criteria.")
+                st.sidebar.warning(f"No parcels found in database larger than {min_acreage} acres.")
         except Exception as e:
-            st.sidebar.error(f"Database query failed: {e}")
+            st.sidebar.error(f"Database query failed. Did you run the SQL script in Supabase? Error: {e}")
 
 # 10. Display the map
 st_folium(m, width=1200, height=600)
